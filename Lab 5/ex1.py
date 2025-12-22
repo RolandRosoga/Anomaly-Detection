@@ -1,62 +1,64 @@
 import numpy as np
 import matplotlib.pyplot as plot
-from scipy.io import loadmat
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import balanced_accuracy_score
-from pyod.models.pca import PCA
-from pyod.models.kpca import KPCA
 
-data = loadmat("shuttle.mat")
-X = data['X']
-y = data['y'].ravel()
+np.random.seed(0)
 
-X_train, X_test, y_train, y_test = train_test_split(X, y,
-                                                    train_size=0.6,
-                                                    random_state=42,
-                                                    stratify=y)
+mean = np.array([5, 10, 2])
+cov = np.array([[3, 2, 2],
+                [2, 10, 1],
+                [2, 1, 2]])
 
-scale = StandardScaler()
-X_trainScaled = scale.fit_transform(X_train)
-X_testScaled = scale.transform(X_test)
+X = np.random.multivariate_normal(mean, cov, size=500)
 
-cont_rate = np.mean(y_train == 1)
+X_centered = X - X.mean(axis=0)
 
-pca = PCA(contamination=cont_rate, random_state=42)
-pca.fit(X_trainScaled)
+Sigma = np.cov(X_centered, rowvar=False)
 
-exp_var = pca.explained_variance_
-cum_explained_var = np.cumsum(exp_var) / np.sum(exp_var)
+eigenvalues, eigenvectors = np.linalg.eigh(Sigma)
 
+idx = np.argsort(eigenvalues)[::-1]
+eigenvalues = eigenvalues[idx]
+eigenvectors = eigenvectors[:, idx]
+
+explained_var = eigenvalues / eigenvalues.sum()
+cum_explained_var = np.cumsum(explained_var)
 
 plot.figure()
-plot.bar(range(1, len(exp_var)+1), exp_var)
-plot.step(range(1, len(exp_var)+1), cum_explained_var, where='mid', color='red')
-plot.title("PCA variances explained")
-plot.xlabel("Comp"); plot.ylabel("Var")
+plot.bar(range(1, 4), explained_var)
+plot.step(range(1, 4), cum_explained_var, where='mid', color='red')
+plot.xlabel("Principal Component")
+plot.ylabel("EV")
 plot.show()
 
-y_train_pred_pca = pca.labels_
-train_score_pca = pca.decision_scores_
-y_test_pred_pca = pca.predict(X_testScaled)
-test_score_pca = pca.decision_function(X_testScaled)
+X_proj = X_centered @ eigenvectors
 
-ba_train_pca = balanced_accuracy_score(y_train, y_train_pred_pca)
-ba_test_pca = balanced_accuracy_score(y_test, y_test_pred_pca)
+cont = 0.1
 
-print("PCA BA train:", ba_train_pca)
-print("PCA BA test:", ba_test_pca)
+pc3 = X_proj[:, 2]
+pc3_dev = np.abs(pc3 - pc3.mean())
+thr_pc3 = np.quantile(pc3_dev, 1 - cont)
+labels_pc3 = pc3_dev > thr_pc3
 
-kpca = KPCA(contamination=cont_rate, kernel="rbf", random_state=42)
-kpca.fit(X_trainScaled)
+pc2 = X_proj[:, 1]
+pc2_dev = np.abs(pc2 - pc2.mean())
+thr_pc2 = np.quantile(pc2_dev, 1 - cont)
+labels_pc2 = pc2_dev > thr_pc2
 
-y_train_pred_KPCA = kpca.labels_
-y_test_pred_KPCA = kpca.predict(X_testScaled)
+X_norm = X_proj / np.sqrt(eigenvalues)
+midd = X_norm.mean(axis=0)
+dist = np.sum((X_norm - midd) ** 2, axis=1)
 
-ba_test_KPCA = balanced_accuracy_score(y_test, y_test_pred_KPCA)
-ba_train_KPCA = balanced_accuracy_score(y_train, y_train_pred_KPCA)
+thr_dist = np.quantile(dist, 1 - cont)
+labels_dist = dist > thr_dist
 
+def plot_3d(X, lable, title):
+    fig = plot.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.scatter(X[~lable, 0], X[~lable, 1], X[~lable, 2], s=10)
+    ax.scatter(X[lable, 0], X[lable, 1], X[lable, 2], s=10)
+    ax.set_title(title)
+    plot.show()
 
-print("KPCA BA test:", ba_test_KPCA)
-print("KPCA BA train:", ba_train_KPCA)
-
+plot_3d(X, labels_pc3, "Anom based on PC3 deviation")
+plot_3d(X, labels_pc2, "Anom based on PC2 deviation")
+plot_3d(X, labels_dist, "Anom based on PCA normalized distance")
